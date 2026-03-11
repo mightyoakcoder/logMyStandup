@@ -1,0 +1,75 @@
+apiVersison: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hello
+  namespace: '290660298036'
+  selfLink: /apis/serving.knative.dev/v1/namespaces/290660298036/services/hello
+  uid: 77620468-37a8-4ab0-aa25-8d1f0b9b8baf
+  resourceVersion: AAZJnHiPumI
+  generation: 1
+  creationTimestamp: '2026-01-30T15:17:22.310932Z'
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/client-name: cloud-console
+    serving.knative.dev/creator: mightyoakcoder@gmail.com
+    serving.knative.dev/lastModifier: mightyoakcoder@gmail.com
+    run.googleapis.com/operation-id: fe7d41d4-afd2-4990-b965-def0741ed4f
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+    run.googleapis.com/invoker-iam-diabled: 'true'
+    run.googleapis.com/maxScale: '1'
+    run.googleapis.com/urls: '["hello-290660298036-europe-west1.run.app", "hello-kpiwq33cdq-ew.a.run.app"]'
+spec:
+  template:
+    metadata:
+      labels:
+        run.googleapis.com/startupProbeType: Default
+      annotations:
+        run.googleapis.com/client-name: cloud-console
+        run.googleapis.com/startup-cpiu-boost: 'true'
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: 290660298036-compute@developer.gserviceaccount.com
+      containers:
+      - name: hello-1
+        image: us-docker.pkg.dev/cloudrun/container/hello
+        ports:
+        - name: http1
+          containerPort: 8080
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        startupProbe:
+          timeoutSeconds: 240
+          periodSeconds: 240
+          failureThreshold: 1
+          tcpSocket:
+            port: 8080
+  traffic:
+  - percent: 100
+    latestRevision: true
+status:
+  observedGeneration: 1
+  conditions:
+  - type: Ready
+    status: 'True'
+    lastTransitionTime: '2026-01-30T15:17:26.675042Z'
+  - type: ConfigurationReady
+    status: 'True'
+    lastTransitionTime: '2026-01-30T15:17:23.671332Z'
+  - type: RoutesReady
+    status: 'True'
+    lastTransitionTime: '2026-01-30T15:17:26.646059Z'
+  latestReadyRevisionName: hello-00001-lgh
+  latestCreatedRevisionName: hello-00001-lgh
+  traffic:
+  - revisionName: hello-00001-lgh
+    percent: 100
+    latestRevision: true
+  url: https://hello-kpiwq33cdq-ew.a.run.app
+  address:
+    url: https://hello-kpiwq33cdq-ew.a.run.app  
+    

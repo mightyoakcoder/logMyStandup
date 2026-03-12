@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import fs from 'fs'
 import path from 'path'
+import { loadSecrets } from './secrets.js'
 import { query } from './database.js'
 
 type Env = {
@@ -13,12 +14,6 @@ type Env = {
 
 const app = new Hono<Env>()
 
-// Static assets preloaded
-const notFoundFilePath = path.join(process.cwd(), 'src', '404.html')
-const notFoundBuffer = fs.readFileSync(notFoundFilePath)
-
-const underConstructionFilePath = path.join(process.cwd(), 'src', 'underConstruction.html')
-const underConstructionBuffer = fs.readFileSync(underConstructionFilePath)
 
 // Middleware
 app.use('*', logger())
@@ -38,12 +33,6 @@ app.get('/', (c) => {
   return c.body(underConstructionBuffer, 200, { 'Content-Type': 'text/html; charset=utf-8' })
 })
 
-// Serve styles.css - static assets
-app.use('/static/*', serveStatic({ root: './static' }))
-app.get('/styles.css', serveStatic({ path: './static/styles.css' }))
-app.get('/dog404.png', serveStatic({ path: './static/dog404.png' }))
-
-
 // ------ Standup routes ------
 app.post('/standups', async (c) => {
   try {
@@ -55,8 +44,8 @@ app.post('/standups', async (c) => {
       blockers?: any[]
     }>()
 
-    const {userId, date, yesterdayWork, todayPlan, blockers} = body
-    
+    const { userId, date, yesterdayWork, todayPlan, blockers } = body
+
     if (!userId || !date) {
       return c.json({ error: 'userId and date are required' }, 400)
     }
@@ -348,22 +337,189 @@ app.get('/standups/:userId/stats', async (c) => {
   }
 })
 
-// React frontend static files
-import { serveStatic } from '@hono/node-server/serve-static'
+// ------ Entries routes ------
+// These routes use a simpler text-based schema matching the frontend form.
+// Required table:
+//   CREATE TABLE entries (
+//     id SERIAL PRIMARY KEY,
+//     date DATE NOT NULL,
+//     yesterday TEXT NOT NULL DEFAULT '',
+//     today TEXT NOT NULL,
+//     blockers TEXT NOT NULL DEFAULT '',
+//     notes TEXT NOT NULL DEFAULT '',
+//     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+//     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+//   );
 
-app.use('/*', serveStatic({ root: './frontend/build' }))
-app.get('/*', serveStatic({ root: './frontend/build' }))
+app.post('/entries', async (c) => {
+  try {
+    const body = await c.req.json<{
+      date?: string
+      yesterday?: string
+      today?: string
+      blockers?: string
+      notes?: string
+    }>()
 
-// 404
-app.notFound((c) => {
-  return c.body(notFoundBuffer, 404, {
-    'Content-Type': 'text/html; charset=utf-8',
-  })
+    const { date, yesterday = '', today, blockers = '', notes = '' } = body
+
+    if (!date || !today) {
+      return c.json({ error: 'date and today are required' }, 400)
+    }
+
+    const result = await query<{
+      id: number
+      date: string
+      yesterday: string
+      today: string
+      blockers: string
+      notes: string
+      created_at: string
+      updated_at: string
+    }>(
+      `INSERT INTO entries (date, yesterday, today, blockers, notes)
+       VALUES ($1::date, $2, $3, $4, $5)
+       RETURNING id, date, yesterday, today, blockers, notes, created_at, updated_at`,
+      [date, yesterday, today, blockers, notes]
+    )
+
+    return c.json(result.rows[0], 201)
+  } catch (err) {
+    console.error('Error creating entry:', err)
+    return c.json({ error: 'Failed to create entry' }, 500)
+  }
 })
 
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+app.get('/entries', async (c) => {
+  try {
+    const url = new URL(c.req.url)
+    const startDate = url.searchParams.get('startDate')
+    const endDate = url.searchParams.get('endDate')
+    const limit = Number(url.searchParams.get('limit') || 50)
 
-app.use('/*', serveStatic({ root: './frontend/build' }))
+    const params: any[] = []
+    let idx = 1
+    let sql = `SELECT id, date, yesterday, today, blockers, notes, created_at, updated_at FROM entries WHERE 1=1`
+
+    if (startDate) {
+      sql += ` AND date >= $${idx++}::date`
+      params.push(startDate)
+    }
+    if (endDate) {
+      sql += ` AND date <= $${idx++}::date`
+      params.push(endDate)
+    }
+
+    sql += ` ORDER BY date DESC LIMIT $${idx}`
+    params.push(limit)
+
+    const { rows } = await query(sql, params)
+    return c.json(rows)
+  } catch (err) {
+    console.error('Error fetching entries:', err)
+    return c.json({ error: 'Failed to fetch entries' }, 500)
+  }
+})
+
+app.get('/entries/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    const { rows } = await query(
+      `SELECT id, date, yesterday, today, blockers, notes, created_at, updated_at FROM entries WHERE id = $1`,
+      [id]
+    )
+
+    if (rows.length === 0) {
+      return c.json({ error: 'Entry not found' }, 404)
+    }
+
+    return c.json(rows[0])
+  } catch (err) {
+    console.error('Error fetching entry:', err)
+    return c.json({ error: 'Failed to fetch entry' }, 500)
+  }
+})
+
+app.put('/entries/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    const body = await c.req.json<{
+      date?: string
+      yesterday?: string
+      today?: string
+      blockers?: string
+      notes?: string
+    }>()
+
+    const { rows: existing } = await query(
+      `SELECT id, date, yesterday, today, blockers, notes FROM entries WHERE id = $1`,
+      [id]
+    )
+
+    if (existing.length === 0) {
+      return c.json({ error: 'Entry not found' }, 404)
+    }
+
+    const current: any = existing[0]
+    const updated = {
+      date: body.date ?? current.date,
+      yesterday: body.yesterday ?? current.yesterday,
+      today: body.today ?? current.today,
+      blockers: body.blockers ?? current.blockers,
+      notes: body.notes ?? current.notes,
+    }
+
+    const { rows } = await query(
+      `UPDATE entries
+       SET date = $1::date, yesterday = $2, today = $3, blockers = $4, notes = $5, updated_at = NOW()
+       WHERE id = $6
+       RETURNING id, date, yesterday, today, blockers, notes, created_at, updated_at`,
+      [updated.date, updated.yesterday, updated.today, updated.blockers, updated.notes, id]
+    )
+
+    return c.json(rows[0])
+  } catch (err) {
+    console.error('Error updating entry:', err)
+    return c.json({ error: 'Failed to update entry' }, 500)
+  }
+})
+
+app.delete('/entries/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'))
+    const { rows } = await query(`SELECT id FROM entries WHERE id = $1`, [id])
+
+    if (rows.length === 0) {
+      return c.json({ error: 'Entry not found' }, 404)
+    }
+
+    await query(`DELETE FROM entries WHERE id = $1`, [id])
+    return c.json({ message: 'Entry deleted successfully' })
+  } catch (err) {
+    console.error('Error deleting entry:', err)
+    return c.json({ error: 'Failed to delete entry' }, 500)
+  }
+})
+
+// React frontend static files
+
+await loadSecrets()
+
+await query(`
+  CREATE TABLE IF NOT EXISTS entries (
+    id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    yesterday TEXT NOT NULL DEFAULT '',
+    today TEXT NOT NULL,
+    blockers TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`)
+console.log('entries table ready')
+
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 
 serve({
   fetch: app.fetch,

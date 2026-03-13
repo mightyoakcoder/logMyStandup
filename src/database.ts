@@ -7,15 +7,15 @@ let pool: InstanceType<typeof Pool> | null = null
 
 function getPool(): InstanceType<typeof Pool> {
   if (!pool) {
+    const host = process.env.DB_HOST ?? ''
+    const isSocket = host.startsWith('/')
     pool = new Pool({
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT) || 5432,
+      host,
+      port: isSocket ? undefined : (Number(process.env.DB_PORT) || 5432),
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      ssl: {
-        rejectUnauthorized: false  // Required for Cloud SQL
-      },
+      ssl: isSocket ? false : { rejectUnauthorized: false },
       max: 10,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,

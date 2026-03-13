@@ -1,8 +1,8 @@
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
 import fs from 'fs'
-import path from 'path'
 import { loadSecrets } from './secrets.js'
 import { query } from './database.js'
 
@@ -23,15 +23,6 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-// Root - serve under construction page
-app.get('/', (c) => {
-  const startTime = c.get('startTime')
-  if (startTime !== undefined) {
-    const duration = Date.now() - startTime
-    console.log(`Root path accessed ${Math.round(duration)}ms`);
-  }
-  return c.body(underConstructionBuffer, 200, { 'Content-Type': 'text/html; charset=utf-8' })
-})
 
 // ------ Standup routes ------
 app.post('/standups', async (c) => {
@@ -501,7 +492,14 @@ app.delete('/entries/:id', async (c) => {
   }
 })
 
-// React frontend static files
+// Serve React frontend static assets
+app.use('/*', serveStatic({ root: './frontend/build' }))
+
+// SPA fallback — any unmatched route returns index.html
+app.use('/*', async (c) => {
+  const html = await fs.promises.readFile('./frontend/build/index.html', 'utf-8')
+  return c.html(html)
+})
 
 await loadSecrets()
 
